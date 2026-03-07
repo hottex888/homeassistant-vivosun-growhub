@@ -18,7 +18,7 @@ jobs:
           type: zip
           directory: custom_components/vivosun_growhub
           filename: vivosun_growhub.zip
-          exclusions: "*.git* .editorconfig *.vscode* *.github*"
+          exclusions: "*.git* .editorconfig *.vscode* *.github* __pycache__/* *.pyc"
 
       - name: Upload release archive
         uses: svenstaro/upload-release-action@v2
