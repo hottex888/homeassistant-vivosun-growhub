@@ -8,6 +8,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = BASE_DIR / "custom_components" / "vivosun_growhub" / "manifest.json"
 STRINGS_PATH = BASE_DIR / "custom_components" / "vivosun_growhub" / "strings.json"
+PYPROJECT_PATH = BASE_DIR / "pyproject.toml"
 EN_TRANSLATION_PATH = BASE_DIR / "custom_components" / "vivosun_growhub" / "translations" / "en.json"
 
 
@@ -29,7 +30,8 @@ def test_manifest_matches_wp1_requirements() -> None:
 
     assert manifest["domain"] == "vivosun_growhub"
     assert manifest["name"] == "Vivosun GrowHub"
-    assert manifest["version"] == "0.1.0"
+    pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
+    assert f'version = "{manifest["version"]}"' in pyproject
     assert manifest["documentation"] == "https://github.com/lientry/homeassistant-vivosun-growhub"
     assert manifest["issue_tracker"] == "https://github.com/lientry/homeassistant-vivosun-growhub/issues"
     assert manifest["config_flow"] is True
