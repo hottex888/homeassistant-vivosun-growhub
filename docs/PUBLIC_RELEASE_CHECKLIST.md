@@ -1,28 +1,27 @@
-# Public Release Checklist
+# Release Checklist
 
-## Target
+## Goal
 
-Public HACS-ready release under the new maintainer account:
+Ship a GitHub release that works cleanly for HACS custom-repository installs.
 
-- GitHub profile: https://github.com/lientry
-- Support link: https://buymeacoffee.com/lientry
+## Repository prerequisites
 
-## Repository setup
-
-1. Create the new repository under `lientry`
-2. Copy the integration source, tests, and public docs
-3. Set repository description, topics, and issue tracking
-4. Enable GitHub issues and Actions
+1. Keep the integration under `custom_components/vivosun_growhub/`
+2. Keep a root `README.md`
+3. Keep a root `hacs.json`
+4. Keep a valid `manifest.json`
+5. Ensure the repository is public and GitHub Actions are enabled
 
 ## Metadata updates
 
 1. Update [manifest.json](../custom_components/vivosun_growhub/manifest.json)
+   - `version`
    - `documentation`
    - `issue_tracker`
    - `codeowners` if needed
-2. Verify root [hacs.json](../hacs.json)
-3. Update README links to the public repository
-4. Update any badges that still reference the old repository
+2. Update [pyproject.toml](../pyproject.toml) version to match
+3. Verify [hacs.json](../hacs.json)
+4. Refresh user-facing docs if behavior or supported devices changed
 
 ## Validation
 
@@ -31,24 +30,31 @@ Public HACS-ready release under the new maintainer account:
 3. Pass the hassfest workflow
 4. Run the local test suite
 5. Perform one manual Home Assistant install smoke test
-6. Perform one HACS custom repository install smoke test
+6. Perform one HACS custom repository install or upgrade smoke test
 
-## HACS requirements
+## HACS expectations
 
-Current HACS documentation requires:
+Current HACS usage in this repository relies on release assets:
 
-- integration files under `custom_components/<domain>/`
-- a root `README.md`
-- a root `hacs.json`
-- a valid `manifest.json`
-- a public repository for HACS usage
+- `hacs.json` sets `zip_release: true`
+- the release asset must be named `vivosun_growhub.zip`
+- the asset contents must match `custom_components/vivosun_growhub/`
 
 ## Release process
 
-1. Make the repository public
-2. Create an initial GitHub release, not just a tag
-3. Add the repository to HACS as a custom repository and test install from that release
-4. After battle testing, decide whether to keep it as custom-repo-only or submit it to the default HACS list
+1. Merge the intended changes onto `main`
+2. Bump the integration version
+3. Commit the version bump
+4. Create and push a git tag matching the version
+5. Create a GitHub release for that tag
+6. Verify the `Release` workflow uploads `vivosun_growhub.zip`
+7. Verify the release page shows the asset and tag you expect
+
+## Optional follow-up
+
+1. Add the repository to HACS as a custom repository and test install from that release
+2. After battle testing, decide whether to keep it as custom-repo-only or submit it to the default HACS list
+3. If targeting the default HACS list later, make sure the domain is registered with `brands.home-assistant.io`
 
 ## Branding
 

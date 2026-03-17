@@ -115,12 +115,15 @@ async def test_sensor_values_scale_and_map_correctly(hass: HomeAssistant) -> Non
     assert inside_vpd.native_value == 1.45
     assert inside_vpd.device_class is None
     assert inside_vpd.state_class == SensorStateClass.MEASUREMENT
+    assert inside_vpd.icon == "mdi:cannabis"
     assert inside_vpd.native_unit_of_measurement == "kPa"
     assert inside_vpd.extra_state_attributes == {"quantity": "vpd"}
 
     assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_outTemp"].native_value == 18.76
     assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_outHumi"].native_value == 52.34
-    assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_outVpd"].native_value == 0.98
+    outside_vpd = entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_outVpd"]
+    assert outside_vpd.native_value == 0.98
+    assert outside_vpd.icon == "mdi:cannabis"
     assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_coreTemp"].native_value == 38.39
     assert entity_by_unique_id[f"vivosun_growhub_{_DEV_ID}_rssi"].native_value == -35.0
 
@@ -211,6 +214,8 @@ async def test_sensor_setup_creates_probe_sensors_for_humidifier(hass: HomeAssis
         f"vivosun_growhub_{_DEV_ID}_waterLv",
         f"vivosun_growhub_{_DEV_ID}_coreTemp",
     }
+    probe_vpd = next(entity for entity in added if entity.unique_id.endswith("_pVpd"))
+    assert probe_vpd.icon == "mdi:cannabis"
 
 
 async def test_sensor_water_level_scales_raw_value(hass: HomeAssistant) -> None:

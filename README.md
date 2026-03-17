@@ -2,7 +2,7 @@
 
 # Home Assistant Vivosun GrowHub
 
-Unofficial Home Assistant integration for Vivosun GrowHub lighting, fan control, and climate telemetry.
+Unofficial Home Assistant integration for Vivosun GrowHub lighting, fan, humidifier, heater, and climate telemetry.
 
 ![Status](https://img.shields.io/badge/Status-Working-green)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-blue)
@@ -20,28 +20,33 @@ Unofficial Home Assistant integration for Vivosun GrowHub lighting, fan control,
 
 ## Why This Integration?
 
-This integration connects a Vivosun GrowHub account to Home Assistant and exposes the device as native `light`, `fan`, `sensor`, and `binary_sensor` entities.
+This integration connects a Vivosun account to Home Assistant and exposes supported devices as native `light`, `fan`, `sensor`, `binary_sensor`, `humidifier`, and `climate` entities.
 
 What is working:
 
 - UI config flow with credential validation
 - Grow light control with correct minimum brightness handling
-- Circulation fan control with 10-step mapping and `natural_wind` preset
-- Duct fan control with 10-step mapping and auto-threshold service
-- Climate telemetry polling for inside/outside temperature, humidity, and VPD
+- Circulation fan control with 10-step mapping, oscillation, `night`, and `natural_wind`
+- Duct fan control with 10-step mapping, `manual`/`auto` modes, and auto-threshold service
+- AeroStream humidifier control with manual/auto modes and water level telemetry
+- AeroFlux heater control with target temperature and manual/auto modes
+- Hybrid climate telemetry from REST point-log polling and MQTT `channel/app` updates
 - Redacted diagnostics export
 
 What this integration is not:
 
 - It is not an official Vivosun integration
 - It does not offer local/offline control
-- It currently targets one GrowHub device per config entry
+- It still keeps some controller-specific assumptions while the repo transitions toward fuller multi-device support
 
 ## Compatibility
 
 Verified working:
 
 - GrowHub `E42A`
+- AeroStream `H19`
+- AeroFlux `W70`
+- VGrow Smart Grow Box
 
 Supported Home Assistant version:
 
@@ -77,7 +82,7 @@ Likely compatible but not yet confirmed:
 ### Requirements
 
 - Home Assistant with support for custom integrations
-- A Vivosun account with at least one GrowHub device
+- A Vivosun account with at least one supported MQTT-capable device
 - Outbound internet access from Home Assistant to the Vivosun API and AWS IoT endpoints
 
 ### Configuration
@@ -109,11 +114,24 @@ Fan behavior is device-accurate rather than linear:
 - Both fans expose a 10-step speed model in Home Assistant
 - The underlying device uses non-linear shadow values
 - Plain `turn_on` defaults to the lowest safe level, not maximum speed
-- The circulation fan also exposes `natural_wind` as a preset mode
+- The circulation fan exposes `normal`, `night`, and `natural_wind` presets
+- The duct fan exposes `manual` and `auto` presets
+
+### Humidifier
+
+- `humidifier.aerostream_<device>_humidifier`
+- Supports `manual` and `auto` modes
+- Exposes current probe humidity, target humidity, level, and water warning state
+
+### Climate
+
+- `climate.aeroflux_<device>_heater`
+- Supports `off` and `heat`
+- Exposes current probe temperature, target temperature, and `manual`/`auto` preset mode
 
 ### Sensors
 
-Enabled by default:
+Controller devices expose:
 
 - Inside Temperature
 - Inside Humidity
@@ -121,15 +139,22 @@ Enabled by default:
 - Outside Temperature
 - Outside Humidity
 - Outside VPD
+- Core Temperature (disabled by default)
+- WiFi Signal (disabled by default)
 
-Disabled by default:
+Humidifier and heater devices expose probe telemetry:
 
-- Core Temperature
-- WiFi Signal
+- Probe Temperature
+- Probe Humidity
+- Probe VPD
+
+Humidifiers additionally expose:
+
+- Water Level
 
 ### Binary sensor
 
-- `binary_sensor.growhub_<device>_connected`
+- One per supported device, for example `binary_sensor.growhub_<device>_connected`
 
 ### Entity service
 
@@ -142,35 +167,40 @@ Fields:
 
 ## Runtime Model
 
-This integration is hybrid.
+This integration is hybrid and multi-device aware.
 
-### MQTT shadow path
+### MQTT path
 
 Used for:
 
-- light control
-- fan control
-- reported device state
+- device control
+- reported shadow state
 - connection state
+- live `channel/app` sensor updates
 
-The working control/state path is the classic unnamed AWS IoT shadow:
+The integration uses the classic unnamed AWS IoT shadow:
 
 - `$aws/things/{thing}/shadow/get`
 - `$aws/things/{thing}/shadow/update`
 - corresponding `accepted`, `documents`, and `delta` topics
 
-### REST polling path
+It also subscribes to:
+
+- `{topicPrefix}/channel/app`
+
+### REST path
 
 Used for:
 
-- climate telemetry
-- current sensor snapshots
+- login and device discovery
+- AWS identity bootstrap
+- point-log telemetry refresh
 
 Climate telemetry is fetched from:
 
 - `POST /iot/data/getPointLog`
 
-The coordinator polls recent samples and uses the newest point-log row as the current climate snapshot.
+The coordinator polls recent samples for each discovered device and uses the newest point-log row as that device's current sensor snapshot. MQTT `channel/app` traffic can update those sensor values between poll cycles.
 
 For implementation details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -181,16 +211,16 @@ For implementation details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Check:
 
 - Home Assistant can reach the Vivosun API and AWS IoT websocket endpoint
-- the account has at least one GrowHub device
+- the account has at least one supported Vivosun device
 - the device appears online in the Vivosun app
 
 ### Controls work oddly
 
-The fans are not percentage-native devices. Home Assistant percentages are mapped onto the GrowHub's discrete app levels. If you expect strict linear percentages, the device will appear inconsistent.
+The fan entities are not percentage-native devices. Home Assistant percentages are mapped onto discrete app levels, so strict linear percentages will not match the device behavior exactly.
 
 ### Climate sensors stay `unknown`
 
-Climate telemetry comes from REST polling, not from the MQTT shadow. After startup or reload, give the integration one poll cycle to populate the sensors.
+Probe and environment telemetry can come from both REST polling and MQTT `channel/app` updates. After startup or reload, give the integration one poll cycle to populate the initial sensor snapshot.
 
 ### Diagnostics
 

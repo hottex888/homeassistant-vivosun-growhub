@@ -20,10 +20,13 @@
     },
     "sensor": {
       "inside_vpd": {
-        "default": "mdi:gauge"
+        "default": "mdi:cannabis"
       },
       "outside_vpd": {
-        "default": "mdi:gauge"
+        "default": "mdi:cannabis"
+      },
+      "probe_vpd": {
+        "default": "mdi:cannabis"
       }
     }
   },
