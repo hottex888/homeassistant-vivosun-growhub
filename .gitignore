@@ -9,6 +9,7 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.worktrees/
 
 # Recon data and local debug artifacts (may contain secrets/device details)
 docs/recon/
