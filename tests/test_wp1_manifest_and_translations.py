@@ -65,6 +65,8 @@ def test_strings_and_en_translation_key_parity() -> None:
     assert "error.unknown" in _flatten_leaf_paths(strings["config"])
     assert "step.user.data.email" in _flatten_leaf_paths(strings["config"])
     assert "step.user.data.password" in _flatten_leaf_paths(strings["config"])
+    assert "step.camera.data.camera_ip" in _flatten_leaf_paths(strings["config"])
     assert "step.init.data.temp_unit" in _flatten_leaf_paths(strings["options"])
+    assert "step.init.data.camera_ip" in _flatten_leaf_paths(strings["options"])
     assert "temp_unit.options.celsius" in _flatten_leaf_paths(strings["selector"])
     assert "temp_unit.options.fahrenheit" in _flatten_leaf_paths(strings["selector"])

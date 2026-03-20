@@ -10,7 +10,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import VivosunApiClient
-from .const import CONF_EMAIL, CONF_PASSWORD, DEFAULT_TEMP_UNIT, DOMAIN
+from .const import CONF_CAMERA_IP, CONF_EMAIL, CONF_HAS_CAMERA, CONF_PASSWORD, DEFAULT_TEMP_UNIT, DOMAIN
 from .exceptions import VivosunAuthError, VivosunConnectionError, VivosunResponseError
 
 OPTIONS_TEMP_UNIT = "temp_unit"
@@ -24,12 +24,17 @@ class VivosunGrowhubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # typ
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize config flow state."""
+        self._pending_user_input: dict[str, str] | None = None
+        self._has_camera = False
+
     async def async_step_user(self, user_input: dict[str, str] | None = None) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                unique_id = await self._async_validate_input(user_input)
+                unique_id, has_camera = await self._async_validate_input(user_input)
             except VivosunAuthError:
                 errors["base"] = "invalid_auth"
             except VivosunConnectionError:
@@ -39,11 +44,16 @@ class VivosunGrowhubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # typ
             else:
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
+                self._pending_user_input = user_input
+                self._has_camera = has_camera
+                if has_camera:
+                    return await self.async_step_camera()
                 return self.async_create_entry(
                     title=user_input[CONF_EMAIL],
                     data={
                         CONF_EMAIL: user_input[CONF_EMAIL],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
+                        CONF_HAS_CAMERA: False,
                     },
                 )
 
@@ -55,11 +65,34 @@ class VivosunGrowhubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # typ
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
-    async def _async_validate_input(self, user_input: dict[str, str]) -> str:
-        """Validate credentials and return account user id."""
+    async def async_step_camera(self, user_input: dict[str, str] | None = None) -> FlowResult:
+        """Optionally collect the LAN IP for a discovered GrowCam device."""
+        pending = self._pending_user_input
+        if pending is None:
+            return await self.async_step_user()
+
+        if user_input is not None:
+            camera_ip = user_input.get(CONF_CAMERA_IP, "").strip()
+            options = {CONF_CAMERA_IP: camera_ip} if camera_ip else {}
+            return self.async_create_entry(
+                title=pending[CONF_EMAIL],
+                data={
+                    CONF_EMAIL: pending[CONF_EMAIL],
+                    CONF_PASSWORD: pending[CONF_PASSWORD],
+                    CONF_HAS_CAMERA: True,
+                },
+                options=options,
+            )
+
+        schema = vol.Schema({vol.Optional(CONF_CAMERA_IP, default=""): str})
+        return self.async_show_form(step_id="camera", data_schema=schema)
+
+    async def _async_validate_input(self, user_input: dict[str, str]) -> tuple[str, bool]:
+        """Validate credentials and return account user id plus camera presence."""
         api = VivosunApiClient(async_get_clientsession(self.hass))
         tokens = await api.login(user_input[CONF_EMAIL], user_input[CONF_PASSWORD])
-        return tokens.user_id
+        devices = await api.get_devices(tokens)
+        return tokens.user_id, any(device.device_type == "camera" for device in devices)
 
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
@@ -88,18 +121,32 @@ class VivosunGrowhubOptionsFlow(config_entries.OptionsFlow):  # type: ignore[mis
                 self.hass.async_create_task(self.hass.config_entries.async_reload(entry.entry_id))
             return self.async_create_entry(title="", data=user_input)
 
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    OPTIONS_TEMP_UNIT,
-                    default=entry.options.get(OPTIONS_TEMP_UNIT, DEFAULT_TEMP_UNIT),
-                ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=["celsius", "fahrenheit"],
-                        translation_key=OPTIONS_TEMP_UNIT,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
+        schema_fields: dict[vol.Marker, object] = {
+            vol.Required(
+                OPTIONS_TEMP_UNIT,
+                default=entry.options.get(OPTIONS_TEMP_UNIT, DEFAULT_TEMP_UNIT),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=["celsius", "fahrenheit"],
+                    translation_key=OPTIONS_TEMP_UNIT,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
                 )
-            }
-        )
+            )
+        }
+        if self._should_show_camera_ip(entry):
+            schema_fields[vol.Optional(
+                CONF_CAMERA_IP,
+                default=entry.options.get(CONF_CAMERA_IP, ""),
+            )] = str
+
+        schema = vol.Schema(schema_fields)
         return self.async_show_form(step_id="init", data_schema=schema)
+
+    def _should_show_camera_ip(self, entry: config_entries.ConfigEntry) -> bool:
+        """Return whether camera IP should be exposed in options."""
+        if entry.data.get(CONF_HAS_CAMERA) or entry.options.get(CONF_CAMERA_IP):
+            return True
+        runtime = self.hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        coordinator = getattr(runtime, "coordinator", None)
+        camera_devices = getattr(coordinator, "camera_devices", None)
+        return bool(camera_devices)

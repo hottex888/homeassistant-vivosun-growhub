@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -34,7 +35,7 @@ from .models import AuthTokens, AwsIdentity, DeviceInfo, infer_device_type
 from .redaction import redact_identifier, sanitize_mapping_for_debug
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
 _LOGGER = logging.getLogger(__name__)
 _AUTH_MESSAGE_MARKERS = ("auth", "credential", "forbidden", "invalid", "login", "password", "token", "unauthorized")
@@ -85,6 +86,7 @@ class VivosunApiClient:
                 device = self._expect_mapping_item(item, f"deviceGroup.{category_key}[{index}]")
                 name = self._expect_str(device, "name")
                 client_id = self._expect_str(device, "clientId")
+                camera_username, camera_password = self._extract_camera_credentials(device)
                 device_info = DeviceInfo(
                     device_id=self._expect_str(device, "deviceId"),
                     client_id=client_id,
@@ -93,6 +95,8 @@ class VivosunApiClient:
                     online=self._optional_int(device, "onlineStatus", default=0) == 1,
                     scene_id=self._expect_scene_id(device),
                     device_type=infer_device_type(name, client_id),
+                    camera_username=camera_username,
+                    camera_password=camera_password,
                 )
                 devices.append(device_info)
 
@@ -177,6 +181,21 @@ class VivosunApiClient:
         ):
             snapshot[key] = self._optional_sensor_int(latest, key)
         return snapshot
+
+    def _extract_camera_credentials(self, device: Mapping[str, object]) -> tuple[str | None, str | None]:
+        """Extract camera LAN credentials from setting.jf when present."""
+        setting = device.get("setting")
+        if not isinstance(setting, Mapping):
+            return None, None
+        jf = setting.get("jf")
+        if not isinstance(jf, Mapping):
+            return None, None
+        username = jf.get("devUser")
+        password = jf.get("devPass")
+        return (
+            username if isinstance(username, str) and username else None,
+            password if isinstance(password, str) and password else None,
+        )
 
     async def _request_json(
         self,

@@ -78,6 +78,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         self._aws_identity: AwsIdentity | None = None
         self._aws_credentials: AwsCredentials | None = None
         self._devices: list[DeviceInfo] = []
+        self._camera_devices: list[DeviceInfo] = []
         self._mqtt_client: MQTTClient | None = None
 
         # Per-device state keyed by device_id
@@ -110,6 +111,11 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
     def devices(self) -> list[DeviceInfo]:
         """Return all discovered devices."""
         return list(self._devices)
+
+    @property
+    def camera_devices(self) -> list[DeviceInfo]:
+        """Return discovered camera devices."""
+        return list(self._camera_devices)
 
     def get_device(self, device_id: str) -> DeviceInfo | None:
         """Return a device by ID."""
@@ -173,6 +179,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             self._aws_identity = None
             self._aws_credentials = None
             self._devices.clear()
+            self._camera_devices.clear()
             self._shadow_states.clear()
             self._sensor_states.clear()
             self._client_id_to_device_id.clear()
@@ -219,6 +226,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         self._logger.info("Starting Vivosun coordinator bootstrap")
         self._tokens = await self._api.login(self._email, self._password)
         all_devices = await self._api.get_devices(self._tokens)
+        self._camera_devices = [device for device in all_devices if device.device_type == "camera"]
         self._devices = self._select_devices(all_devices)
         self._build_topic_maps()
         self._aws_identity = await self._api.get_aws_identity(self._tokens)

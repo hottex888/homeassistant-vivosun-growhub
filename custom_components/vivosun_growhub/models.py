@@ -48,6 +48,8 @@ class DeviceInfo:
     online: bool
     scene_id: int
     device_type: str = "unknown"
+    camera_username: str | None = None
+    camera_password: str | None = None
 
 
 def infer_device_type(name: str, client_id: str = "") -> str:

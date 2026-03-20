@@ -15,6 +15,8 @@ API_REQUEST_TIMEOUT_SECONDS = 15
 
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
+CONF_CAMERA_IP = "camera_ip"
+CONF_HAS_CAMERA = "has_camera"
 DEFAULT_TEMP_UNIT = "celsius"
 
 SHADOW_NAME = "GrowHub"
@@ -96,4 +98,5 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.HUMIDIFIER,
     Platform.CLIMATE,
+    Platform.CAMERA,
 ]

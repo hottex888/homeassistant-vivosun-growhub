@@ -213,6 +213,39 @@ async def test_get_devices_handles_missing_online_status() -> None:
     assert devices[0].online is False
 
 
+async def test_get_devices_extracts_camera_lan_credentials() -> None:
+    """get_devices() should parse camera LAN credentials from setting.jf."""
+    payload = {
+        "code": 0,
+        "success": True,
+        "message": "success",
+        "data": {
+            "deviceGroup": {
+                "GROW": [
+                    {
+                        "deviceId": "camera-1",
+                        "clientId": "",
+                        "topicPrefix": "",
+                        "name": "GrowCam C4",
+                        "onlineStatus": 1,
+                        "scene": {"sceneId": 1001},
+                        "setting": {"jf": {"devUser": "abjd", "devPass": "4kt5em"}},
+                    },
+                ]
+            }
+        },
+    }
+    session = cast("aiohttp.ClientSession", _MockSession(responses=[_MockResponse(status=200, payload=payload)]))
+    client = VivosunApiClient(session)
+
+    devices = await client.get_devices(_valid_tokens())
+
+    assert len(devices) == 1
+    assert devices[0].device_type == "camera"
+    assert devices[0].camera_username == "abjd"
+    assert devices[0].camera_password == "4kt5em"
+
+
 async def test_get_point_log_returns_latest_sensor_snapshot() -> None:
     payload = {
         "code": 0,
