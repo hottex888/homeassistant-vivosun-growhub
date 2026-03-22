@@ -46,6 +46,7 @@ _RECONNECT_BACKOFF_INITIAL = 1.0
 _RECONNECT_BACKOFF_MAX = 60.0
 _RECONNECT_HEALTH_CHECK_SECONDS = 2.0
 _POINT_LOG_WINDOW_SECONDS = 300
+_SHADOW_REFRESH_INTERVAL_SECONDS = 30.0
 
 
 class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ignore[misc]
@@ -78,6 +79,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         self._aws_identity: AwsIdentity | None = None
         self._aws_credentials: AwsCredentials | None = None
         self._devices: list[DeviceInfo] = []
+        self._camera_devices: list[DeviceInfo] = []
         self._mqtt_client: MQTTClient | None = None
 
         # Per-device state keyed by device_id
@@ -95,6 +97,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         self._start_lock = asyncio.Lock()
         self._reconnect_lock = asyncio.Lock()
         self._started = False
+        self._last_shadow_refresh_request_at: dict[str, datetime] = {}
 
     @property
     def device(self) -> DeviceInfo:
@@ -111,6 +114,11 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         """Return all discovered devices."""
         return list(self._devices)
 
+    @property
+    def camera_devices(self) -> list[DeviceInfo]:
+        """Return discovered camera devices."""
+        return list(self._camera_devices)
+
     def get_device(self, device_id: str) -> DeviceInfo | None:
         """Return a device by ID."""
         for d in self._devices:
@@ -126,6 +134,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
     async def _async_update_data(self) -> dict[str, object]:
         """Poll climate telemetry while MQTT handles device control and push state."""
         await self._refresh_point_log()
+        await self._async_refresh_stale_shadow_states()
         snapshot = self._build_state_snapshot()
         self.async_set_updated_data(snapshot)
         return snapshot
@@ -173,10 +182,12 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             self._aws_identity = None
             self._aws_credentials = None
             self._devices.clear()
+            self._camera_devices.clear()
             self._shadow_states.clear()
             self._sensor_states.clear()
             self._client_id_to_device_id.clear()
             self._topic_prefix_to_device_id.clear()
+            self._last_shadow_refresh_request_at.clear()
 
     async def async_publish_shadow_update(
         self,
@@ -219,6 +230,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
         self._logger.info("Starting Vivosun coordinator bootstrap")
         self._tokens = await self._api.login(self._email, self._password)
         all_devices = await self._api.get_devices(self._tokens)
+        self._camera_devices = [device for device in all_devices if device.device_type == "camera"]
         self._devices = self._select_devices(all_devices)
         self._build_topic_maps()
         self._aws_identity = await self._api.get_aws_identity(self._tokens)
@@ -310,9 +322,8 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
 
         self._logger.info("Connected MQTT session for %d devices", len(self._devices))
 
-        # Request initial shadow state for all devices
         for device in self._devices:
-            await mqtt_client.publish(TOPIC_SHADOW_GET.format(thing=device.client_id), b"{}")
+            await self._async_request_shadow_refresh(device.device_id)
 
     async def _disconnect_mqtt_client(self) -> None:
         mqtt_client = self._mqtt_client
@@ -347,6 +358,7 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             # Channel topics: {topic_prefix}/channel/app
             elif "/channel/app" in topic:
                 self._merge_sensor_state(device_id, parse_channel_sensor_payload(payload))
+                self._set_shadow_connection_state(device_id, True)
                 updated = True
         except ShadowParseError:
             self._logger.debug(
@@ -393,6 +405,10 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
     def _merge_sensor_state(self, device_id: str, state: ChannelSensorState) -> None:
         self._sensor_states.setdefault(device_id, {}).update(cast("dict[str, object]", state))
 
+    def _set_shadow_connection_state(self, device_id: str, connected: bool) -> None:
+        device_shadow = self._shadow_states.setdefault(device_id, {})
+        _deep_merge_mapping(device_shadow, {"connection": {"connected": connected}})
+
     def _build_state_snapshot(self) -> dict[str, object]:
         """Build immutable-ish snapshot consumed by entities."""
         devices_map: dict[str, object] = {d.device_id: d for d in self._devices}
@@ -403,6 +419,44 @@ class VivosunCoordinator(DataUpdateCoordinator[dict[str, object]]):  # type: ign
             "mqtt_connected": self.is_mqtt_connected,
         }
         return snapshot
+
+    async def _async_refresh_stale_shadow_states(self) -> None:
+        """Re-request shadow state when a device is stuck in a disconnected state."""
+        if not self.is_mqtt_connected:
+            return
+        for device in self._devices:
+            if self._shadow_connection_state(device.device_id) is not False:
+                continue
+            if not self._shadow_refresh_due(device.device_id):
+                continue
+            await self._async_request_shadow_refresh(device.device_id)
+
+    def _shadow_connection_state(self, device_id: str) -> bool | None:
+        device_shadow = self._shadow_states.get(device_id)
+        if not isinstance(device_shadow, dict):
+            return None
+        connection = device_shadow.get("connection")
+        if not isinstance(connection, dict):
+            return None
+        connected = connection.get("connected")
+        if isinstance(connected, bool):
+            return connected
+        return None
+
+    def _shadow_refresh_due(self, device_id: str) -> bool:
+        last_request_at = self._last_shadow_refresh_request_at.get(device_id)
+        if last_request_at is None:
+            return True
+        now = datetime.now(tz=UTC)
+        return (now - last_request_at).total_seconds() >= _SHADOW_REFRESH_INTERVAL_SECONDS
+
+    async def _async_request_shadow_refresh(self, device_id: str) -> None:
+        device = self.get_device(device_id)
+        mqtt_client = self._mqtt_client
+        if device is None or mqtt_client is None or not mqtt_client.is_connected:
+            return
+        self._last_shadow_refresh_request_at[device_id] = datetime.now(tz=UTC)
+        await mqtt_client.publish(TOPIC_SHADOW_GET.format(thing=device.client_id), b"{}")
 
     async def _credentials_refresh_loop(self) -> None:
         """Wait for refresh boundary and trigger reconnect cycle."""

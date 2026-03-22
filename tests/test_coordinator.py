@@ -12,6 +12,7 @@ import pytest
 from custom_components.vivosun_growhub.aws_auth import AWS_CREDENTIAL_REFRESH_SKEW, AwsCredentials
 from custom_components.vivosun_growhub.const import (
     TOPIC_CHANNEL_APP,
+    TOPIC_SHADOW_GET,
     TOPIC_SHADOW_GET_ACCEPTED,
     TOPIC_SHADOW_UPDATE,
 )
@@ -41,6 +42,7 @@ class _ApiStub:
                 name="Device B",
                 online=True,
                 scene_id=66079,
+                device_type="humidifier",
             ),
             DeviceInfo(
                 device_id="device-1",
@@ -49,6 +51,7 @@ class _ApiStub:
                 name="Device A",
                 online=True,
                 scene_id=66078,
+                device_type="controller",
             ),
         ]
         self.identity = AwsIdentity(
@@ -290,6 +293,66 @@ async def test_coordinator_mqtt_callbacks_update_shadow_and_sensor_state(
     assert device_sensors["outTemp"] == 1900
     assert device_sensors["inHumi"] == 5500
 
+    await coordinator.async_shutdown()
+
+
+async def test_coordinator_channel_payload_recovers_stale_connection_state(
+    hass: HomeAssistant,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    api = _ApiStub()
+    aws_auth = _AwsAuthStub()
+    aws_auth.queue_credentials(_credentials(datetime.now(tz=UTC) + timedelta(hours=1)))
+    _patch_coordinator_deps(monkeypatch, api, aws_auth)
+
+    coordinator = VivosunCoordinator(hass, object(), email="user@example.com", password="secret")
+    await coordinator.async_start()
+
+    mqtt = _MqttStub.instances[0]
+    device_id = coordinator.device.device_id
+    await mqtt.emit(
+        TOPIC_SHADOW_GET_ACCEPTED.format(thing=coordinator.device.client_id),
+        b'{"state":{"reported":{"connected":0}}}',
+    )
+    assert coordinator.data["shadows"][device_id]["connection"]["connected"] is False
+
+    await mqtt.emit(
+        TOPIC_CHANNEL_APP.format(topic_prefix=coordinator.device.topic_prefix),
+        b'{"inTemp":2300}',
+    )
+
+    assert coordinator.data["shadows"][device_id]["connection"]["connected"] is True
+    await coordinator.async_shutdown()
+
+
+async def test_coordinator_refresh_requests_shadow_sync_when_connection_state_is_stale(
+    hass: HomeAssistant,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "custom_components.vivosun_growhub.coordinator._SHADOW_REFRESH_INTERVAL_SECONDS",
+        0.0,
+    )
+    api = _ApiStub()
+    aws_auth = _AwsAuthStub()
+    aws_auth.queue_credentials(_credentials(datetime.now(tz=UTC) + timedelta(hours=1)))
+    _patch_coordinator_deps(monkeypatch, api, aws_auth)
+
+    coordinator = VivosunCoordinator(hass, object(), email="user@example.com", password="secret")
+    await coordinator.async_start()
+
+    mqtt = _MqttStub.instances[0]
+    shadow_get_publishes = [p for p in mqtt.published if p[0].endswith("/shadow/get")]
+    assert len(shadow_get_publishes) == 2
+
+    await mqtt.emit(
+        TOPIC_SHADOW_GET_ACCEPTED.format(thing=coordinator.device.client_id),
+        b'{"state":{"reported":{"connected":0}}}',
+    )
+    await coordinator._async_update_data()
+
+    refreshed_shadow_gets = [p for p in mqtt.published if p[0] == TOPIC_SHADOW_GET.format(thing="thing-1")]
+    assert len(refreshed_shadow_gets) == 2
     await coordinator.async_shutdown()
 
 
