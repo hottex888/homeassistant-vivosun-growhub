@@ -99,7 +99,7 @@ async def test_constants_match_wp1_spec() -> None:
     assert DESIRED_LEVEL_PATH_NOTE == "desired.<key>.manu.lv"
     assert PLATFORMS == [
         Platform.LIGHT, Platform.FAN, Platform.SENSOR,
-        Platform.BINARY_SENSOR, Platform.HUMIDIFIER, Platform.CLIMATE,
+        Platform.BINARY_SENSOR, Platform.HUMIDIFIER, Platform.CLIMATE, Platform.CAMERA,
     ]
 
 

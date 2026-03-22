@@ -10,7 +10,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.vivosun_growhub.config_flow import VivosunGrowhubOptionsFlow
-from custom_components.vivosun_growhub.const import DOMAIN
+from custom_components.vivosun_growhub.const import CONF_CAMERA_IP, CONF_HAS_CAMERA, DOMAIN
 from custom_components.vivosun_growhub.models import DeviceInfo, RuntimeData
 from custom_components.vivosun_growhub.sensor import VivosunChannelSensorEntity, async_setup_entry
 
@@ -113,3 +113,81 @@ async def test_options_flow_entry_accessor_falls_back_to_base_config_entry() -> 
     flow = VivosunGrowhubOptionsFlow(config_entry=entry)
 
     assert flow._entry() is entry
+
+
+async def test_options_flow_updates_camera_ip_when_camera_supported(
+    hass: HomeAssistant,
+    enable_custom_integrations: None,
+) -> None:
+    coordinator = _StubCoordinator()
+    coordinator.camera_devices = [
+        DeviceInfo(
+            device_id="camera-1",
+            client_id="",
+            topic_prefix="",
+            name="GrowCam C4",
+            online=True,
+            scene_id=1001,
+            device_type="camera",
+        )
+    ]
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="t",
+        data={CONF_HAS_CAMERA: True},
+        options={"temp_unit": "celsius"},
+    )
+    entry.add_to_hass(hass)
+    runtime = RuntimeData(entry_id=entry.entry_id, coordinator=cast("object", coordinator))
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)) as reload_mock:
+        init_result = await hass.config_entries.options.async_init(entry.entry_id)
+        finish_result = await hass.config_entries.options.async_configure(
+            init_result["flow_id"],
+            user_input={"temp_unit": "celsius", CONF_CAMERA_IP: "10.0.15.202"},
+        )
+        assert finish_result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+
+    assert entry.options == {"temp_unit": "celsius", CONF_CAMERA_IP: "10.0.15.202"}
+    reload_mock.assert_awaited_once_with(entry.entry_id)
+
+
+async def test_options_flow_blank_camera_ip_is_treated_as_noop(
+    hass: HomeAssistant,
+    enable_custom_integrations: None,
+) -> None:
+    coordinator = _StubCoordinator()
+    coordinator.camera_devices = [
+        DeviceInfo(
+            device_id="camera-1",
+            client_id="",
+            topic_prefix="",
+            name="GrowCam C4",
+            online=True,
+            scene_id=1001,
+            device_type="camera",
+        )
+    ]
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="t",
+        data={CONF_HAS_CAMERA: True},
+        options={"temp_unit": "celsius"},
+    )
+    entry.add_to_hass(hass)
+    runtime = RuntimeData(entry_id=entry.entry_id, coordinator=cast("object", coordinator))
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+
+    with patch.object(hass.config_entries, "async_reload", AsyncMock(return_value=True)) as reload_mock:
+        init_result = await hass.config_entries.options.async_init(entry.entry_id)
+        finish_result = await hass.config_entries.options.async_configure(
+            init_result["flow_id"],
+            user_input={"temp_unit": "celsius", CONF_CAMERA_IP: "  "},
+        )
+        assert finish_result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+
+    assert entry.options == {"temp_unit": "celsius"}
+    reload_mock.assert_not_awaited()
