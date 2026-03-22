@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
@@ -69,21 +70,28 @@ class VivosunGrowhubConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # typ
         if pending is None:
             return await self.async_step_user()
 
+        errors: dict[str, str] = {}
         if user_input is not None:
             camera_ip = user_input.get(CONF_CAMERA_IP, "").strip()
-            options = {CONF_CAMERA_IP: camera_ip} if camera_ip else {}
-            return self.async_create_entry(
-                title=pending[CONF_EMAIL],
-                data={
-                    CONF_EMAIL: pending[CONF_EMAIL],
-                    CONF_PASSWORD: pending[CONF_PASSWORD],
-                    CONF_HAS_CAMERA: True,
-                },
-                options=options,
-            )
+            if camera_ip:
+                try:
+                    ipaddress.ip_address(camera_ip)
+                except ValueError:
+                    errors[CONF_CAMERA_IP] = "invalid_ip"
+            if not errors:
+                options = {CONF_CAMERA_IP: camera_ip} if camera_ip else {}
+                return self.async_create_entry(
+                    title=pending[CONF_EMAIL],
+                    data={
+                        CONF_EMAIL: pending[CONF_EMAIL],
+                        CONF_PASSWORD: pending[CONF_PASSWORD],
+                        CONF_HAS_CAMERA: True,
+                    },
+                    options=options,
+                )
 
         schema = vol.Schema({vol.Optional(CONF_CAMERA_IP, default=""): str})
-        return self.async_show_form(step_id="camera", data_schema=schema)
+        return self.async_show_form(step_id="camera", data_schema=schema, errors=errors)
 
     async def _async_validate_input(self, user_input: dict[str, str]) -> tuple[str, bool]:
         """Validate credentials and return account user id plus camera presence."""
@@ -114,11 +122,19 @@ class VivosunGrowhubOptionsFlow(config_entries.OptionsFlow):  # type: ignore[mis
     async def async_step_init(self, user_input: dict[str, str] | None = None) -> FlowResult:
         """Manage options."""
         entry = self._entry()
+        errors: dict[str, str] = {}
         if user_input is not None:
             normalized_input = self._normalize_options(user_input)
-            if normalized_input != entry.options:
-                self.hass.async_create_task(self.hass.config_entries.async_reload(entry.entry_id))
-            return self.async_create_entry(title="", data=normalized_input)
+            camera_ip = normalized_input.get(CONF_CAMERA_IP, "")
+            if camera_ip:
+                try:
+                    ipaddress.ip_address(camera_ip)
+                except ValueError:
+                    errors[CONF_CAMERA_IP] = "invalid_ip"
+            if not errors:
+                if normalized_input != entry.options:
+                    self.hass.async_create_task(self.hass.config_entries.async_reload(entry.entry_id))
+                return self.async_create_entry(title="", data=normalized_input)
 
         schema_fields: dict[vol.Marker, object] = {
             vol.Required(
@@ -141,7 +157,7 @@ class VivosunGrowhubOptionsFlow(config_entries.OptionsFlow):  # type: ignore[mis
             ] = str
 
         schema = vol.Schema(schema_fields)
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
 
     def _should_show_camera_ip(self, entry: config_entries.ConfigEntry) -> bool:
         """Return whether camera IP should be exposed in options."""

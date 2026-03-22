@@ -48,6 +48,7 @@ async def test_camera_setup_creates_camera_entity_when_ip_is_configured(
 
     assert len(added) == 1
     assert added[0].unique_id == "vivosun_growhub_camera-1_camera"
+    assert added[0].available is True
     assert await added[0].stream_source() == "rtsp://abjd:4kt5em@10.0.15.202:554/"
 
 
@@ -65,3 +66,42 @@ async def test_camera_setup_skips_when_ip_not_configured(hass: HomeAssistant) ->
     await async_setup_entry(hass, entry, _add)
 
     assert added == []
+
+
+async def test_camera_stream_source_quotes_credentials() -> None:
+    entity = VivosunGrowCamEntity(
+        device=DeviceInfo(
+            device_id="camera-1",
+            client_id="",
+            topic_prefix="",
+            name="GrowCam C4",
+            online=True,
+            scene_id=1001,
+            device_type="camera",
+            camera_username="user:name",
+            camera_password="pw@rd/1",
+        ),
+        camera_ip="10.0.15.202",
+    )
+
+    assert await entity.stream_source() == "rtsp://user%3Aname:pw%40rd%2F1@10.0.15.202:554/"
+
+
+async def test_camera_entity_unavailable_without_credentials() -> None:
+    entity = VivosunGrowCamEntity(
+        device=DeviceInfo(
+            device_id="camera-1",
+            client_id="",
+            topic_prefix="",
+            name="GrowCam C4",
+            online=True,
+            scene_id=1001,
+            device_type="camera",
+            camera_username=None,
+            camera_password=None,
+        ),
+        camera_ip="10.0.15.202",
+    )
+
+    assert entity.available is False
+    assert await entity.stream_source() is None
